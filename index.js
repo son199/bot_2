@@ -19,6 +19,11 @@ const exchange = new ccxt.binance({
   options: { defaultType: "future" },
 });
 
+// Lưu thời điểm gửi lệnh cho từng cặp symbol-timeframe-type
+const sentSignals = new Map();
+const SIGNAL_COOLDOWN_MS = 15 * 60 * 1000; // 15 phút
+const DEFAULT_LEVERAGE = 20;
+
 async function getSignals() {
   const markets = await exchange.loadMarkets();
   console.log(`Loaded ${Object.keys(markets).length} markets.`);
@@ -62,8 +67,11 @@ async function getSignals() {
           ema50 > ema200 &&
           rsi > 40 &&
           rsi < 50 &&
-          bullish && 
-          isTrendUp
+          bullish &&
+          isTrendUp &&
+          curr.close > ema20 
+          // &&
+          // curr.close > ema50
         ) {
           const entry = curr.close;
           const sl = curr.low * 0.995; // SL cách 0.5% dưới đáy nến
@@ -76,16 +84,25 @@ async function getSignals() {
           console.log(`🚀 LONG signal detected for ${symbol} at ${timeframe}`);
           console.log(`Entry=${entry}, SL=${sl}, TP1=${tp1}, TP2=${tp2}, TP3=${tp3}`);
 
-          await sendMessage(
-            `🚀 *LONG Signal Detected*\n` +
-            `Symbol: ${symbol}\nTimeframe: ${timeframe}\n\n` +
-            `*Entry:* ${entry}\n` +
-            `*Stop Loss:* ${sl}\n` +
-            `*TP1:* ${tp1}\n*TP2:* ${tp2}\n*TP3:* ${tp3}\n\n` +
-            `EMA20>EMA50>EMA200\nRSI=${rsi.toFixed(2)}` +
-            `Bullish: ${bullish}`+
-            `Trend: ${isTrendUp ? 'Uptrend' : 'Sideways'}`
-          );
+          // Chống gửi lại lệnh trong 15 phút
+          const signalKey = `${symbol}_${timeframe}_LONG`;
+          const now = Date.now();
+          if (!sentSignals.has(signalKey) || now - sentSignals.get(signalKey) > SIGNAL_COOLDOWN_MS) {
+            await sendMessage(
+              `🚀 *LONG Signal Detected*\n` +
+              `Symbol: ${symbol}\nTimeframe: ${timeframe}\n\n` +
+              `*Entry:* ${entry.toFixed(5)}\n` +
+              `*Stop Loss:* ${sl.toFixed(5)}\n` +
+              `*TP1:* ${tp1.toFixed(5)}\n*TP2:* ${tp2.toFixed(5)}\n*TP3:* ${tp3.toFixed(5)}\n\n` +
+              `*Đòn Bẩy:* ${DEFAULT_LEVERAGE}x\n` +
+              `EMA20>EMA50>EMA200\nRSI=${rsi.toFixed(2)}` +
+              `Bullish: ${bullish}`+
+              `Trend: ${isTrendUp ? 'Uptrend' : 'Sideways'}`
+            );
+            sentSignals.set(signalKey, now);
+          } else {
+            console.log(`LONG signal for ${symbol} at ${timeframe} đã gửi trong 15 phút qua, bỏ qua.`);
+          }
         }
 
         // === Điều kiện SHORT ===
@@ -93,9 +110,12 @@ async function getSignals() {
           ema20 < ema50 &&
           ema50 < ema200 &&
           rsi > 50 &&
-          rsi < 60 &&
+          rsi < 100 &&
           bearish &&
-          isTrendDown
+          isTrendDown &&
+          curr.close < ema20 
+          // &&
+          // curr.close < ema50
         ) {
           const entry = curr.close;
           const sl = curr.high * 1.005; // SL cách 0.5% trên đỉnh nến
@@ -108,16 +128,25 @@ async function getSignals() {
           console.log(`🔻 SHORT signal detected for ${symbol} at ${timeframe}`);
           console.log(`Entry=${entry}, SL=${sl}, TP1=${tp1}, TP2=${tp2}, TP3=${tp3}`);
 
-          await sendMessage(
-            `🔻 *SHORT Signal Detected*\n` +
-            `Symbol: ${symbol}\nTimeframe: ${timeframe}\n\n` +
-            `*Entry:* ${entry}\n` +
-            `*Stop Loss:* ${sl}\n` +
-            `*TP1:* ${tp1}\n*TP2:* ${tp2}\n*TP3:* ${tp3}\n\n` +
-            `EMA20<EMA50<EMA200\nRSI=${rsi.toFixed(2)}` +
-            `Bearish: ${bearish}` +
-            `Trend: ${isTrendDown ? 'Downtrend' : 'Sideways'}`
-          );
+          // Chống gửi lại lệnh trong 15 phút
+          const signalKey = `${symbol}_${timeframe}_SHORT`;
+          const now = Date.now();
+          if (!sentSignals.has(signalKey) || now - sentSignals.get(signalKey) > SIGNAL_COOLDOWN_MS) {
+            await sendMessage(
+              `🔻 *SHORT Signal Detected*\n` +
+              `Symbol: ${symbol}\nTimeframe: ${timeframe}\n\n` +
+              `*Entry:* ${entry.toFixed(5)}\n` +
+              `*Stop Loss:* ${sl.toFixed(5)}\n` +
+              `*TP1:* ${tp1.toFixed(5)}\n*TP2:* ${tp2.toFixed(5)}\n*TP3:* ${tp3.toFixed(5)}\n\n` +
+              `*Đòn Bẩy:* ${DEFAULT_LEVERAGE}x\n` +
+              `EMA20<EMA50<EMA200\nRSI=${rsi.toFixed(2)}` +
+              `Bearish: ${bearish}` +
+              `Trend: ${isTrendDown ? 'Downtrend' : 'Sideways'}`
+            );
+            sentSignals.set(signalKey, now);
+          } else {
+            console.log(`SHORT signal for ${symbol} at ${timeframe} đã gửi trong 15 phút qua, bỏ qua.`);
+          }
         }
 
         else {
