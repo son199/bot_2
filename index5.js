@@ -37,7 +37,30 @@ function isPinbar(candle, direction, minTailRatio = 0.2) {
     return false;
 }
 
-// Hàm phát hiện CRT Pattern
+// Hàm tìm Swing High/Low trong khoảng lookback nến
+function findSwingPoints(candles, lookback = 40) {
+    if (candles.length < lookback) lookback = candles.length;
+    const recentCandles = candles.slice(-lookback);
+    
+    const swingHigh = Math.max(...recentCandles.map(c => c.high));
+    const swingLow = Math.min(...recentCandles.map(c => c.low));
+    
+    return { swingHigh, swingLow };
+}
+
+// Hàm tính Premium/Discount Zone
+function getPremiumDiscountZone(currentPrice, swingHigh, swingLow) {
+    const range = swingHigh - swingLow;
+    if (range === 0) return 'EQUILIBRIUM';
+    
+    const pricePosition = (currentPrice - swingLow) / range;
+    
+    if (pricePosition >= 0.7) return 'PREMIUM';      // >70% = Premium Zone
+    if (pricePosition <= 0.3) return 'DISCOUNT';     // <30% = Discount Zone  
+    return 'EQUILIBRIUM';                             // 30-70% = Neutral Zone
+}
+
+// Hàm phát hiện CRT Pattern với Premium/Discount filter
 function detectCRTPattern(candles) {
     if (candles.length < 2) return null;
 
@@ -47,6 +70,12 @@ function detectCRTPattern(candles) {
     const rangeHigh = rangeCandle.high;
     const rangeLow = rangeCandle.low;
     const rangeBody = rangeHigh - rangeLow;
+
+    // Tìm Swing High/Low để xác định Premium/Discount Zone
+    const { swingHigh, swingLow } = findSwingPoints(candles, 40);
+    const currentZone = getPremiumDiscountZone(currentCandle.close, swingHigh, swingLow);
+    
+    console.log(`Swing: ${swingLow.toFixed(2)} - ${swingHigh.toFixed(2)}, Current: ${currentCandle.close.toFixed(2)}, Zone: ${currentZone}`);
 
     // Kiểm tra nến 2 chỉ được phép phủ tối đa 35% của nến 1
     const overlapHigh = Math.min(currentCandle.high, rangeHigh);
@@ -59,10 +88,11 @@ function detectCRTPattern(candles) {
         return null; // Nến 2 phủ quá 35% nến 1, không hợp lệ
     }
 
-    // 🔵 TH1 – Sweep xuống (Buy Setup)
+    // 🔵 TH1 – Sweep xuống (Buy Setup) - Chỉ trong DISCOUNT Zone
     if (currentCandle.low < rangeLow && // Nến 2 low phá xuống Range Low
         currentCandle.close > rangeLow && // Nến 2 đóng cửa trên Range Low
-        isPinbar(currentCandle, 'bullish')) { // Tạo Pinbar đuôi dưới
+        isPinbar(currentCandle, 'bullish') && // Tạo Pinbar đuôi dưới
+        currentZone === 'DISCOUNT') { // Chỉ trong Discount Zone
 
         return {
             type: 'BUY_SETUP',
@@ -71,14 +101,17 @@ function detectCRTPattern(candles) {
             rangeLow: rangeLow,
             sweepLow: currentCandle.low,
             closePrice: currentCandle.close,
-            message: 'Setup CRT xuất hiện (Sweep xuống) – chờ entry nến 3'
+            zone: currentZone,
+            swingRange: `${swingLow.toFixed(2)} - ${swingHigh.toFixed(2)}`,
+            message: 'Setup CRT xuất hiện (Sweep xuống trong Discount Zone) – chờ entry nến 3'
         };
     }
 
-    // 🔴 TH2 – Sweep lên (Sell Setup)
+    // 🔴 TH2 – Sweep lên (Sell Setup) - Chỉ trong PREMIUM Zone
     if (currentCandle.high > rangeHigh && // Nến 2 high phá Range High
         currentCandle.close < rangeHigh && // Nến 2 đóng cửa dưới Range High
-        isPinbar(currentCandle, 'bearish')) { // Tạo Pinbar đuôi trên
+        isPinbar(currentCandle, 'bearish') && // Tạo Pinbar đuôi trên
+        currentZone === 'PREMIUM') { // Chỉ trong Premium Zone
 
         return {
             type: 'SELL_SETUP',
@@ -87,7 +120,9 @@ function detectCRTPattern(candles) {
             rangeLow: rangeLow,
             sweepHigh: currentCandle.high,
             closePrice: currentCandle.close,
-            message: 'Setup CRT xuất hiện (Sweep lên) – chờ entry nến 3'
+            zone: currentZone,
+            swingRange: `${swingLow.toFixed(2)} - ${swingHigh.toFixed(2)}`,
+            message: 'Setup CRT xuất hiện (Sweep lên trong Premium Zone) – chờ entry nến 3'
         };
     }
 
@@ -166,6 +201,8 @@ async function scanCRTSignals() {
                         📉 Range Low: ${crtPattern.rangeLow}
                         ${crtPattern.type === 'BUY_SETUP' ? '🔻 Sweep Low: ' + crtPattern.sweepLow : '🔺 Sweep High: ' + crtPattern.sweepHigh}
                         💰 Close Price: ${crtPattern.closePrice}
+                        🎯 Zone: ${crtPattern.zone}
+                        📊 Swing Range: ${crtPattern.swingRange}
                         ⏰ Time: ${new Date().toLocaleString()}
                         📝 ${crtPattern.message}
                         `;
@@ -176,6 +213,8 @@ async function scanCRTSignals() {
                         const telegramMsg = `🚨 CRT SETUP - ${symbol} (${timeframe}) 🚨\n\n` +
                             `${crtPattern.type === 'BUY_SETUP' ? '🔵' : '🔴'} ${crtPattern.direction} Setup\n` +
                             `📊 Range: ${crtPattern.rangeLow} - ${crtPattern.rangeHigh}\n` +
+                            `🎯 Zone: ${crtPattern.zone}\n` +
+                            `📊 Swing: ${crtPattern.swingRange}\n` +
                             `💰 Close: ${crtPattern.closePrice}\n` +
                             `⏰ ${new Date().toLocaleString()} (còn ${minutesToNext}p)\n\n` +
                             `📝 ${crtPattern.message}`;
