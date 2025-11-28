@@ -15,6 +15,8 @@ const INTERVALS = ['15m', '30m', "1h", '4h'];
 const exchange = new ccxt.binance({
     options: { defaultType: "future" },
 });
+    // Lưu thời điểm gửi tín hiệu gần nhất cho từng symbol-timeframe
+    const lastSignalSent = {};
 
 // Hàm kiểm tra Pinbar (điều kiện nới lỏng)
 function isPinbar(candle, direction, minTailRatio = 0.2) {
@@ -194,32 +196,40 @@ async function scanCRTSignals() {
                     const crtPattern = detectCRTPattern(candles);
 
                     if (crtPattern) {
-                        const logMsg = `
-                        🚨 ${crtPattern.type} DETECTED - ${symbol} (${timeframe}) 🚨
-                        📊 Pattern: ${crtPattern.direction}
-                        📈 Range High: ${crtPattern.rangeHigh}
-                        📉 Range Low: ${crtPattern.rangeLow}
-                        ${crtPattern.type === 'BUY_SETUP' ? '🔻 Sweep Low: ' + crtPattern.sweepLow : '🔺 Sweep High: ' + crtPattern.sweepHigh}
-                        💰 Close Price: ${crtPattern.closePrice}
-                        🎯 Zone: ${crtPattern.zone}
-                        📊 Swing Range: ${crtPattern.swingRange}
-                        ⏰ Time: ${new Date().toLocaleString()}
-                        📝 ${crtPattern.message}
-                        `;
+                        const key = `${symbol}_${timeframe}`;
+                        const now = Date.now();
+                        // Nếu đã gửi tín hiệu trong 15 phút gần nhất thì bỏ qua
+                        if (lastSignalSent[key] && now - lastSignalSent[key] < 15 * 60 * 1000) {
+                            console.log(`[${new Date().toLocaleString()}] ⏳ Đã gửi tín hiệu cho ${symbol} - ${timeframe} trong 15p, bỏ qua.`);
+                        } else {
+                            const logMsg = `
+                            🚨 ${crtPattern.type} DETECTED - ${symbol} (${timeframe}) 🚨
+                            📊 Pattern: ${crtPattern.direction}
+                            📈 Range High: ${crtPattern.rangeHigh}
+                            📉 Range Low: ${crtPattern.rangeLow}
+                            ${crtPattern.type === 'BUY_SETUP' ? '🔻 Sweep Low: ' + crtPattern.sweepLow : '🔺 Sweep High: ' + crtPattern.sweepHigh}
+                            💰 Close Price: ${crtPattern.closePrice}
+                            🎯 Zone: ${crtPattern.zone}
+                            📊 Swing Range: ${crtPattern.swingRange}
+                            ⏰ Time: ${new Date().toLocaleString()}
+                            📝 ${crtPattern.message}
+                            `;
 
-                        console.log(logMsg);
+                            console.log(logMsg);
 
-                        // Gửi thông báo Telegram
-                        const telegramMsg = `🚨 CRT SETUP - ${symbol} (${timeframe}) 🚨\n\n` +
-                            `${crtPattern.type === 'BUY_SETUP' ? '🔵' : '🔴'} ${crtPattern.direction} Setup\n` +
-                            `📊 Range: ${crtPattern.rangeLow} - ${crtPattern.rangeHigh}\n` +
-                            `🎯 Zone: ${crtPattern.zone}\n` +
-                            `📊 Swing: ${crtPattern.swingRange}\n` +
-                            `💰 Close: ${crtPattern.closePrice}\n` +
-                            `⏰ ${new Date().toLocaleString()} (còn ${minutesToNext}p)\n\n` +
-                            `📝 ${crtPattern.message}`;
+                            // Gửi thông báo Telegram
+                            const telegramMsg = `🚨 CRT SETUP - ${symbol} (${timeframe}) 🚨\n\n` +
+                                `${crtPattern.type === 'BUY_SETUP' ? '🔵' : '🔴'} ${crtPattern.direction} Setup\n` +
+                                `📊 Range: ${crtPattern.rangeLow} - ${crtPattern.rangeHigh}\n` +
+                                `🎯 Zone: ${crtPattern.zone}\n` +
+                                `📊 Swing: ${crtPattern.swingRange}\n` +
+                                `💰 Close: ${crtPattern.closePrice}\n` +
+                                `⏰ ${new Date().toLocaleString()} (còn ${minutesToNext}p)\n\n` +
+                                `📝 ${crtPattern.message}`;
 
-                        await sendMessage(telegramMsg);
+                            await sendMessage(telegramMsg);
+                            lastSignalSent[key] = now;
+                        }
                     }
 
                 } catch (error) {
